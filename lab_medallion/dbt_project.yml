@@ -1,20 +1,29 @@
 name: lab_medallion
-version: "1.0.0"
+version: 1.0.0
 profile: lab_medallion
-
-model-paths: ["models"]
-analysis-paths: ["analyses"]
-test-paths: ["tests"]
-seed-paths: ["seeds"]
-macro-paths: ["macros"]
-snapshot-paths: ["snapshots"]
-
+model-paths:
+- models
+analysis-paths:
+- analyses
+test-paths:
+- tests
+seed-paths:
+- seeds
+macro-paths:
+- macros
+snapshot-paths:
+- snapshots
 clean-targets:
-  - target
-  - dbt_packages
-
+- target
+- dbt_packages
 models:
   lab_medallion:
     silver:
       +materialized: view
       +schema: silver
+seeds:
+  lab_medallion:
+    zip_state_reference:
+      +column_types:
+        zip_code: varchar
+        state_code: varchar
