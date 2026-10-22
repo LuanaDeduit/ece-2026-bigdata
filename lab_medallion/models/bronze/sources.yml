@@ -1,0 +1,11 @@
+sources:
+  - name: bronze
+    description: Raw datasets uploaded to S3 by the dataset generators.
+    config:
+      meta:
+        external_location: "read_csv('s3://{{ env_var('LAB_BUCKET_NAME') }}/bronze/{name}.csv', strict_mode = false)"
+    tables:
+      - name: users
+        description: One row per user.
+      - name: orders
+        description: One row per order.
