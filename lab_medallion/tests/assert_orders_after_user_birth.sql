@@ -1,5 +1,3 @@
-{{ config(severity='warn') }}
-
 select
     o.order_id,
     o.ordered_at,
