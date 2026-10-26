@@ -20,6 +20,10 @@ models:
   - name: state
     data_tests:
     - not_null
+    - relationships:
+        arguments:
+          to: ref('states')
+          field: code
   - name: username_normalized
     description: Username in lowercase without leading or trailing whitespace.
     data_tests:
