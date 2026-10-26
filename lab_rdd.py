@@ -169,7 +169,7 @@ def timed_count(rdd, label):
 
 for name, rdd in [
     ("orders_rdd", orders_rdd),
-    ("user_quantity", user_quantity),
+    ("totals_reduce", totals_reduce),
 ]:
     rdd.unpersist(blocking=True)
     timed_count(rdd, name + " without cache, first")
@@ -179,4 +179,10 @@ for name, rdd in [
     timed_count(rdd, name + " reading cache")
     rdd.unpersist(blocking=True)
 
+# Optional Spark UI pause
+import sys
+if "--ui" in sys.argv:
+    orders_rdd.cache()
+    orders_rdd.count()
+    input("Spark UI ready on port 4040. Press Enter to stop.")
 spark.stop()
