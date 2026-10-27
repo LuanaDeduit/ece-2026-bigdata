@@ -158,6 +158,56 @@ try:
         ORDER BY users DESC, state
     """).show(10)
 
+    # Write and validate silver Parquet
+    users_path = f"s3a://{BUCKET}/silver/spark/users.parquet"
+    orders_path = f"s3a://{BUCKET}/silver/spark/orders.parquet"
+
+    stg_users.write.mode("overwrite").parquet(users_path)
+    stg_orders.write.mode("overwrite").parquet(orders_path)
+
+    users_silver = spark.read.parquet(users_path)
+    orders_silver = spark.read.parquet(orders_path)
+
+    assert users_silver.count() == users_bronze.count()
+    assert orders_silver.count() == stg_orders.count()
+
+    assert users_silver.exceptAll(stg_users).count() == 0
+    assert stg_users.exceptAll(users_silver).count() == 0
+    assert orders_silver.exceptAll(stg_orders).count() == 0
+    assert stg_orders.exceptAll(orders_silver).count() == 0
+
+    print("Parquet users:", users_silver.count())
+    print("Parquet orders:", orders_silver.count())
+    print("Parquet round-trip matches: True")
+
+    # Write and inspect Iceberg tables
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS lab.silver")
+
+    stg_users.writeTo("lab.silver.users").createOrReplace()
+    stg_orders.writeTo("lab.silver.orders").createOrReplace()
+
+    users_iceberg = spark.table("lab.silver.users")
+    orders_iceberg = spark.table("lab.silver.orders")
+
+    assert users_iceberg.count() == users_bronze.count()
+    assert orders_iceberg.count() == stg_orders.count()
+
+    print("Iceberg users:", users_iceberg.count())
+    print("Iceberg orders:", orders_iceberg.count())
+
+    spark.sql("""
+        SELECT snapshot_id, operation, committed_at
+        FROM lab.silver.orders.snapshots
+        ORDER BY committed_at
+    """).show(truncate=False)
+
+    spark.sql("""
+        SELECT file_path, file_format, record_count, file_size_in_bytes
+        FROM lab.silver.orders.files
+    """).show(truncate=False)
+
+    print("Iceberg validation: True")
+
     # NEXT_STEPS
 finally:
     spark.stop()
