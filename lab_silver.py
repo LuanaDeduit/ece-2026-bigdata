@@ -208,6 +208,106 @@ try:
 
     print("Iceberg validation: True")
 
+    # Exercise 1: birthdate validation
+    first_orders = stg_orders.groupBy("user_id").agg(
+        F.min("ordered_at").alias("first_order_at")
+    )
+
+    users_birthdate_df = (
+        stg_users.join(first_orders, "user_id", "left")
+        .withColumn(
+            "birthdate_is_valid",
+            F.col("birthdate") <= F.to_date("first_order_at"),
+        )
+    )
+
+    stg_orders.createOrReplaceTempView("stg_orders")
+    users_birthdate_sql = spark.sql("""
+        SELECT u.*, f.first_order_at,
+               u.birthdate <= CAST(f.first_order_at AS DATE)
+                   AS birthdate_is_valid
+        FROM stg_users u
+        LEFT JOIN (
+            SELECT user_id, min(ordered_at) AS first_order_at
+            FROM stg_orders
+            GROUP BY user_id
+        ) f ON u.user_id = f.user_id
+    """).select(*users_birthdate_df.columns)
+
+    assert users_birthdate_df.exceptAll(users_birthdate_sql).count() == 0
+    assert users_birthdate_sql.exceptAll(users_birthdate_df).count() == 0
+
+    print("Birthdate DataFrame and SQL match: True")
+    users_birthdate_df.groupBy("birthdate_is_valid").count().show()
+    users_birthdate_df.filter(
+        F.col("birthdate_is_valid") == False
+    ).select("user_id", "birthdate", "first_order_at").show(truncate=False)
+
+    # Exercise 2: ZIP extraction benchmark
+    import re
+    import timeit
+    import pandas as pd
+
+    zip_pattern = r"([A-Z]{2}) ([0-9]{5})$"
+
+    @F.udf("string")
+    def zip_python(address):
+        if address is None:
+            return None
+        match = re.search(zip_pattern, address)
+        return match.group(2) if match else ""
+
+    @F.pandas_udf("string")
+    def zip_pandas(addresses: pd.Series) -> pd.Series:
+        extracted = addresses.str.extract(zip_pattern, expand=True)[1]
+        return extracted.fillna("").where(addresses.notna(), None)
+
+    zip_methods = {
+        "native": users_bronze.select(
+            "uuid", F.regexp_extract("address", zip_pattern, 2).alias("zip_code")
+        ),
+        "python_udf": users_bronze.select(
+            "uuid", zip_python("address").alias("zip_code")
+        ),
+        "pandas_udf": users_bronze.select(
+            "uuid", zip_pandas("address").alias("zip_code")
+        ),
+    }
+
+    reference = sorted(
+        (row["uuid"], row["zip_code"])
+        for row in zip_methods["native"].collect()
+    )
+
+    for name, frame in zip_methods.items():
+        result = sorted(
+            (row["uuid"], row["zip_code"]) for row in frame.collect()
+        )
+        assert result == reference, name
+        timings = timeit.repeat(lambda: frame.collect(), repeat=3, number=1)
+        print(
+            f"ZIP {name}: rows={len(result)}, "
+            f"min={min(timings):.4f}s, "
+            f"mean={sum(timings) / len(timings):.4f}s"
+        )
+
+    print("ZIP methods match: True")
+
+    # Exercise 3: cache bronze DataFrames
+    users_bronze.cache()
+    orders_bronze.cache()
+
+    print("Cached bronze users:", users_bronze.count(), flush=True)
+    print("Cached bronze orders:", orders_bronze.count(), flush=True)
+
+    print("Repeated counts:", users_bronze.count(), orders_bronze.count(), flush=True)
+    users_bronze.select("uuid").explain()
+    orders_bronze.select("quantity").explain()
+
+    import sys
+    if "--ui" in sys.argv:
+        input("Cache ready. Inspect Spark UI, then press Enter.")
+
     # NEXT_STEPS
 finally:
     spark.stop()
