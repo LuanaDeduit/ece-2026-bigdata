@@ -308,6 +308,50 @@ try:
     if "--ui" in sys.argv:
         input("Cache ready. Inspect Spark UI, then press Enter.")
 
+    # Exercise 4: append and time travel
+    table_name = "lab.silver.orders"
+    snapshot_before = (
+        spark.table(table_name + ".snapshots")
+        .orderBy(F.col("committed_at").desc())
+        .first()["snapshot_id"]
+    )
+    count_before = spark.table(table_name).count()
+
+    new_order = stg_orders.orderBy("order_id").limit(1).withColumn(
+        "order_id", F.lit("00000000-0000-4000-8000-000000000001")
+    )
+    new_order.writeTo(table_name).append()
+
+    count_after = spark.table(table_name).count()
+    historical = spark.sql(
+        f"SELECT * FROM {table_name} VERSION AS OF {snapshot_before}"
+    )
+    count_historical = historical.count()
+
+    assert count_after == count_before + 1
+    assert count_historical == count_before
+
+    print("Iceberg before append:", count_before)
+    print("Iceberg after append:", count_after)
+    print("Iceberg historical count:", count_historical)
+    print("Historical snapshot:", snapshot_before)
+
+    spark.sql("""
+        SELECT snapshot_id, operation, committed_at
+        FROM lab.silver.orders.snapshots
+        ORDER BY committed_at
+    """).show(truncate=False)
+
+    # Use a separate Parquet directory for this experiment.
+    experiment_path = f"s3a://{BUCKET}/silver/spark/orders_append_exercise"
+    stg_orders.write.mode("overwrite").parquet(experiment_path)
+    new_order.write.mode("append").parquet(experiment_path)
+
+    parquet_after = spark.read.parquet(experiment_path).count()
+    assert parquet_after == count_before + 1
+    print("Parquet after append:", parquet_after)
+    print("Time travel validation: True")
+
     # NEXT_STEPS
 finally:
     spark.stop()
